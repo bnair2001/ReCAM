@@ -19,6 +19,8 @@ def run(args):
         keys = np.pad(cam_dict['keys'] + 1, (1, 0), mode='constant')
         cls_labels = np.argmax(cams, axis=0)
         cls_labels = keys[cls_labels]
+        print(type(cls_labels))
+        print(cls_labels.shape)
         preds.append(cls_labels.copy())
         labels.append(dataset.get_example_by_keys(i, (1,))[0])
 

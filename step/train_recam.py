@@ -93,13 +93,13 @@ def run(args):
             loss_cls = F.multilabel_soft_margin_loss(x, label)
             loss_ce,acc = recam_predictor(cam,label)
             loss = loss_cls + args.recam_loss_weight*loss_ce
-
+            print(loss_ce)
             avg_meter.add({'loss_cls': loss_cls.item()})
-            avg_meter.add({'loss_ce': loss_ce.item()})
-            avg_meter.add({'acc': acc.item()})
+            avg_meter.add({'loss_ce': loss_ce[0].item()})
+            avg_meter.add({'acc': acc[0].item()})
             
             optimizer.zero_grad()
-            loss.backward()
+            loss.sum().backward()
             optimizer.step()
             global_step += 1
 

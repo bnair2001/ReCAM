@@ -7,37 +7,53 @@ import imageio
 from misc import imutils
 from PIL import Image
 import torch.nn.functional as F
+import torchvision.transforms.functional as fn
+import pandas as pd
+from torchvision import transforms
+from skimage.transform import resize
+from tqdm import tqdm
 
-IMG_FOLDER_NAME = "JPEGImages"
-ANNOT_FOLDER_NAME = "Annotations"
+IMG_FOLDER_NAME = "/home/bnair/data/chest14"
+DS_CLASSIFICATION = "/home/bnair/ReCAM/voc12/full_ds_classification.csv"
+
 IGNORE = 255
 
-CAT_LIST = ['aeroplane', 'bicycle', 'bird', 'boat',
-        'bottle', 'bus', 'car', 'cat', 'chair',
-        'cow', 'diningtable', 'dog', 'horse',
-        'motorbike', 'person', 'pottedplant',
-        'sheep', 'sofa', 'train',
-        'tvmonitor']
+CAT_LIST = [
+    "Atelectasis",
+    "Cardiomegaly",
+    "Effusion",
+    "Infiltration",
+    "Mass",
+    "Nodule",
+    "Pneumonia",
+    "Pneumothorax",
+    "Consolidation",
+    "Edema",
+    "Emphysema",
+    "Fibrosis",
+    "Pleural_Thickening",
+    "Hernia",
+]
 
 N_CAT = len(CAT_LIST)
 
-CAT_NAME_TO_NUM = dict(zip(CAT_LIST,range(len(CAT_LIST))))
+CAT_NAME_TO_NUM = dict(zip(CAT_LIST, range(len(CAT_LIST))))
 
-cls_labels_dict = np.load('voc12/cls_labels.npy', allow_pickle=True).item()
+cls_labels_dict = np.load('/home/bnair/ReCAM/voc12/cls_labels.npy', allow_pickle=True).item()
+
+# print(cls_labels_dict)
 
 def decode_int_filename(int_filename):
     s = str(int(int_filename))
     return s[:4] + '_' + s[4:]
 
 def load_image_label_from_xml(img_name, voc12_root):
-    from xml.dom import minidom
+    csv_file = pd.read_csv(DS_CLASSIFICATION)
+    el_list = str(csv_file[csv_file["file"] == "0"+img_name+".png"].label.item()).split("|")
+    multi_cls_lab = np.zeros((20), np.float32)
 
-    elem_list = minidom.parse(os.path.join(voc12_root, ANNOT_FOLDER_NAME, decode_int_filename(img_name) + '.xml')).getElementsByTagName('name')
-
-    multi_cls_lab = np.zeros((N_CAT), np.float32)
-
-    for elem in elem_list:
-        cat_name = elem.firstChild.data
+    for el in el_list:
+        cat_name = el
         if cat_name in CAT_LIST:
             cat_num = CAT_NAME_TO_NUM[cat_name]
             multi_cls_lab[cat_num] = 1.0
@@ -46,22 +62,31 @@ def load_image_label_from_xml(img_name, voc12_root):
 
 def load_image_label_list_from_xml(img_name_list, voc12_root):
 
-    return [load_image_label_from_xml(img_name, voc12_root) for img_name in img_name_list]
+    return [
+        load_image_label_from_xml(img_name, voc12_root) for img_name in tqdm(img_name_list)
+    ]
 
 def load_image_label_list_from_npy(img_name_list):
+    # read from txt file
+    # img_name_list = np.loadtxt(img_name_list)
+    # print("here")
+    # print(img_name_list)
 
-    return np.array([cls_labels_dict[img_name] for img_name in img_name_list])
+    fl = open(img_name_list, "r")
+    img_name_list = [line.strip() for line in fl.readlines()]
+
+    return np.array([cls_labels_dict[img_name[1:].split('.png')[0]] for img_name in img_name_list])
 
 def get_img_path(img_name, voc12_root):
-    if not isinstance(img_name, str):
-        img_name = decode_int_filename(img_name)
-    return os.path.join(voc12_root, IMG_FOLDER_NAME, img_name + '.jpg')
+    return os.path.join(voc12_root, IMG_FOLDER_NAME, img_name )
 
 def load_img_name_list(dataset_path):
+    # print(dataset_path)
+    # fl = open(dataset_path, "r")
+    # # img_name_list = np.loadtxt(dataset_path, dtype=np.int32)
+    # img_name_list = [line.strip() for line in fl.readlines()]
 
-    img_name_list = np.loadtxt(dataset_path, dtype=np.int32)
-
-    return img_name_list
+    return dataset_path
 
 
 class TorchvisionNormalize():
@@ -129,10 +154,17 @@ class VOC12ImageDataset(Dataset):
         return len(self.img_name_list)
 
     def __getitem__(self, idx):
-        name = self.img_name_list[idx]
-        name_str = decode_int_filename(name)
+        # print("here")
+        # print(self.img_name_list)
 
-        img = np.asarray(imageio.imread(get_img_path(name_str, self.voc12_root)))
+        fl = open(self.img_name_list, "r")
+    # # img_name_list = np.loadtxt(dataset_path, dtype=np.int32)
+        img_name_list1 = [line.strip() for line in fl.readlines()]
+
+        name = img_name_list1[idx]
+        # name_str = decode_int_filename(name)
+
+        img = np.asarray(Image.open(get_img_path(name, self.voc12_root)).convert('RGB'))
 
         if self.resize_long:
             img = imutils.random_resize_long(img, self.resize_long[0], self.resize_long[1])
@@ -155,7 +187,10 @@ class VOC12ImageDataset(Dataset):
         if self.to_torch:
             img = imutils.HWC_to_CHW(img)
 
-        return {'name': name_str, 'img': img}
+        # img = resize(img, (512, 512))
+
+
+        return {'name': name, 'img': img}
 
 class VOC12ClassificationDataset(VOC12ImageDataset):
 
@@ -174,7 +209,8 @@ class VOC12ClassificationDataset(VOC12ImageDataset):
         # label = torch.nonzero(label)[:,0]
         # label = label[torch.randint(len(label),(1,))]
         # out['label'] = label
-
+        # print("here")
+        # print(self.label_list)
         out['label'] = torch.from_numpy(self.label_list[idx])
 
         return out
@@ -265,10 +301,14 @@ class VOC12ClassificationDatasetMSF(VOC12ClassificationDataset):
         self.scales = scales
 
     def __getitem__(self, idx):
-        name = self.img_name_list[idx]
-        name_str = decode_int_filename(name)
+        fl = open(self.img_name_list, "r")
+        img_name_list1 = [line.strip() for line in fl.readlines()]
 
-        img = imageio.imread(get_img_path(name_str, self.voc12_root))
+        name = img_name_list1[idx]
+        # name = self.img_name_list[idx]
+        # name_str = decode_int_filename(name)
+
+        img = np.asarray(Image.open(get_img_path(name, self.voc12_root)).convert('RGB'))
 
         ms_img_list = []
         for s in self.scales:
@@ -282,7 +322,7 @@ class VOC12ClassificationDatasetMSF(VOC12ClassificationDataset):
         if len(self.scales) == 1:
             ms_img_list = ms_img_list[0]
 
-        out = {"name": name_str, "img": ms_img_list, "size": (img.shape[0], img.shape[1]),
+        out = {"name": name, "img": ms_img_list, "size": (img.shape[0], img.shape[1]),
                "label": torch.from_numpy(self.label_list[idx])}
         return out
 

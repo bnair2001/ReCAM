@@ -29,34 +29,39 @@ def _work(process_id, model, dataset, args):
         recam_predictor.cuda()
         for iter, pack in enumerate(data_loader):
 
-            img_name = pack['name'][0]
-            label = pack['label'][0]
-            size = pack['size']
+            try:
 
-            strided_size = imutils.get_strided_size(size, 4)
-            strided_up_size = imutils.get_strided_up_size(size, 16)
+                img_name = pack['name'][0]
+                label = pack['label'][0]
+                size = pack['size']
 
-            outputs = [model.forward2(img[0].cuda(non_blocking=True),recam_predictor.classifier.weight) for img in pack['img']] # b x 20 x w x h
+                strided_size = imutils.get_strided_size(size, 4)
+                strided_up_size = imutils.get_strided_up_size(size, 16)
 
-            strided_cam = torch.sum(torch.stack(
-                [F.interpolate(torch.unsqueeze(o, 0), strided_size, mode='bilinear', align_corners=False)[0] for o in outputs]), 0)
+                outputs = [model.forward2(img[0].cuda(non_blocking=True),recam_predictor.classifier.weight) for img in pack['img']] # b x 20 x w x h
 
-            highres_cam = [F.interpolate(torch.unsqueeze(o, 1), strided_up_size,
-                                         mode='bilinear', align_corners=False) for o in outputs]
-            highres_cam = torch.sum(torch.stack(highres_cam, 0), 0)[:, 0, :size[0], :size[1]]
-            valid_cat = torch.nonzero(label)[:, 0]
+                strided_cam = torch.sum(torch.stack(
+                    [F.interpolate(torch.unsqueeze(o, 0), strided_size, mode='bilinear', align_corners=False)[0] for o in outputs]), 0)
 
-            strided_cam = strided_cam[valid_cat]
-            strided_cam /= F.adaptive_max_pool2d(strided_cam, (1, 1)) + 1e-5
+                highres_cam = [F.interpolate(torch.unsqueeze(o, 1), strided_up_size,
+                                            mode='bilinear', align_corners=False) for o in outputs]
+                highres_cam = torch.sum(torch.stack(highres_cam, 0), 0)[:, 0, :size[0], :size[1]]
+                valid_cat = torch.nonzero(label)[:, 0]
 
-            highres_cam = highres_cam[valid_cat]
-            highres_cam /= F.adaptive_max_pool2d(highres_cam, (1, 1)) + 1e-5
-            
-            # save cams
-            np.save(os.path.join(args.cam_out_dir, img_name + '.npy'), {"keys": valid_cat, "cam": strided_cam.cpu(), "high_res": highres_cam.cpu().numpy()})
+                strided_cam = strided_cam[valid_cat]
+                strided_cam /= F.adaptive_max_pool2d(strided_cam, (1, 1)) + 1e-5
 
-            if process_id == n_gpus - 1 and iter % (len(databin) // 20) == 0:
-                print("%d " % ((5*iter+1)//(len(databin) // 20)), end='')
+                highres_cam = highres_cam[valid_cat]
+                highres_cam /= F.adaptive_max_pool2d(highres_cam, (1, 1)) + 1e-5
+                
+                # save cams
+                np.save(os.path.join(args.cam_out_dir, img_name + '.npy'), {"keys": valid_cat, "cam": strided_cam.cpu(), "high_res": highres_cam.cpu().numpy()})
+
+                if process_id == n_gpus - 1 and iter % (len(databin) // 20) == 0:
+                    print("%d " % ((5*iter+1)//(len(databin) // 20)), end='')
+            except Exception as e:
+                print("For image %s, error: %s" % (img_name, e))
+                continue
 
 
 def run(args):
